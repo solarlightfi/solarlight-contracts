@@ -37,13 +37,9 @@ interface ITreasury is IEpoch {
 
     function daoFundSharedPercent() external view returns (uint256);
 
-    function marketingFund() external view returns (address);
+    function devFund() external view returns (address);
 
-    function marketingFundSharedPercent() external view returns (uint256);
-
-    function insuranceFund() external view returns (address);
-
-    function insuranceFundSharedPercent() external view returns (uint256);
+    function devFundSharedPercent() external view returns (uint256);
 
     function getBondDiscountRate(address _token) external view returns (uint256);
 

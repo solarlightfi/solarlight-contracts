@@ -19,7 +19,7 @@
     "deploy:ropsten": "truffle migrate --network ropsten",
     "deploy:rinkeby": "truffle migrate --network rinkeby",
     "deploy:mainnet": "truffle migrate --network mainnet",
-    "flat:contracts": "sol-merger 'contracts/distribution/SolarRewardPool.sol' ./build/contracts-flat"
+    "flat:contracts": "sol-merger 'contracts/Treasury.sol' ./build/contracts-flat"
   },
   "dependencies": {
     "@openzeppelin/contracts": "^3.3.0",

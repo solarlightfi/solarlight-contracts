@@ -42,7 +42,6 @@ contract Boardroom is ShareWrapper, ContractGuard {
     IERC20 public light;
     IERC20 public solar;
     ITreasury public treasury;
-    address public insuranceFund;
 
     mapping(address => mapping(address => Memberseat)) public members; // pegToken => _member => Memberseat
     mapping(address => uint256) public timers; // start deposit time for each members
@@ -104,15 +103,15 @@ contract Boardroom is ShareWrapper, ContractGuard {
         IERC20 _light,
         IERC20 _solar,
         ITreasury _treasury,
-        address _insuranceFund
+        address _reserveFund
     ) public notInitialized {
         flare = _flare;
-        solar = _solar;
         light = _light;
+        share = _solar;
         treasury = _treasury;
-        insuranceFund = _insuranceFund;
+        reserveFund = _reserveFund;
 
-        withdrawLockupEpochs = 12; // Lock for 12 epochs (72h) before release withdraw
+        withdrawLockupEpochs = 3; // Lock for 12 epochs (72h) before release withdraw
 
         initialized = true;
         operator = msg.sender;
@@ -128,9 +127,8 @@ contract Boardroom is ShareWrapper, ContractGuard {
         treasury = _treasury;
     }
 
-    function setInsuranceFund(address _insuranceFund) external onlyOperator {
-        require(_insuranceFund != address(0), "zero");
-        insuranceFund = _insuranceFund;
+    function setShare(address _solar) external onlyOperator {
+        share = IERC20(_solar);
     }
 
     function setLockUp(uint256 _withdrawLockupEpochs) external onlyOperator {
@@ -266,11 +264,11 @@ contract Boardroom is ShareWrapper, ContractGuard {
         }
     }
 
-    function claimReward(bool _useLightCollateral) external onlyOneBlock {
-        _claimReward(_useLightCollateral);
+    function claimReward() external onlyOneBlock {
+        _claimReward();
     }
 
-    function _claimReward(bool _useLightCollateral) internal updateReward(msg.sender) {
+    function _claimReward() internal updateReward(msg.sender) {
         timers[msg.sender] = treasury.epoch(); // reset timer
         uint256 _ptlength = pegTokens.length;
         for (uint256 _pti = 0; _pti < _ptlength; ++_pti) {
@@ -309,7 +307,7 @@ contract Boardroom is ShareWrapper, ContractGuard {
         // do not allow to drain core tokens
         require(address(_token) != address(flare), "flare");
         require(address(_token) != address(light), "light");
-        require(address(_token) != address(solar), "solar");
+        require(address(_token) != address(share), "solar");
         _token.safeTransfer(_to, _amount);
     }
 }

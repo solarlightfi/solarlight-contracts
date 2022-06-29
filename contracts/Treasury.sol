@@ -14,7 +14,6 @@ import "./interfaces/ITreasury.sol";
 import "./interfaces/IBasisAsset.sol";
 import "./interfaces/IOracle.sol";
 import "./interfaces/IBoardroom.sol";
-import "./interfaces/IRegulationStats.sol";
 import "./interfaces/IRewardPool.sol";
 
 // SOLARLIGHT FINANCE
@@ -62,7 +61,7 @@ contract Treasury is ITreasury, ContractGuard, ReentrancyGuard {
     uint256 public maxSupplyContractionPercent;
     uint256 public maxDebtRatioPercent;
 
-    // 28 first epochs (1 week) with 4.5% expansion regardless of flare price
+    // 28 first epochs (1 week) with 2% expansion regardless of flare price
     uint256 public bootstrapEpochs;
     uint256 public bootstrapSupplyExpansionPercent;
 
@@ -76,13 +75,8 @@ contract Treasury is ITreasury, ContractGuard, ReentrancyGuard {
     address public override daoFund;
     uint256 public override daoFundSharedPercent; // 3000 (30%)
 
-    address public override marketingFund;
-    uint256 public override marketingFundSharedPercent; // 1000 (10%)
-
-    address public override insuranceFund;
-    uint256 public override insuranceFundSharedPercent; // 2000 (20%)
-
-    address public regulationStats;
+    address public override devFund;
+    uint256 public override devFundSharedPercent; // 1000 (10%)
 
     address[] public supplyLockedAccounts;
 
@@ -108,8 +102,8 @@ contract Treasury is ITreasury, ContractGuard, ReentrancyGuard {
     event RedeemedBonds(address token, address bond, address indexed from, uint256 amount, uint256 bondAmount);
     event BoughtBonds(address token, address bond, address indexed from, uint256 amount, uint256 bondAmount);
     event TreasuryFunded(uint256 timestamp, uint256 seigniorage);
-    event FundingAdded(uint256 indexed epoch, uint256 timestamp, uint256 price, uint256 expanded, uint256 boardroomFunded, uint256 daoFunded, uint256 marketingFunded, uint256 insuranceFund);
-    event PegTokenFundingAdded(address indexed pegToken, uint256 indexed epoch, uint256 timestamp, uint256 price, uint256 expanded, uint256 boardroomFunded, uint256 daoFunded, uint256 marketingFunded, uint256 insuranceFund);
+    event FundingAdded(uint256 indexed epoch, uint256 timestamp, uint256 price, uint256 expanded, uint256 boardroomFunded, uint256 daoFunded, uint256 devFunded);
+    event PegTokenFundingAdded(address indexed pegToken, uint256 indexed epoch, uint256 timestamp, uint256 price, uint256 expanded, uint256 boardroomFunded, uint256 daoFunded, uint256 devFunded);
 
     /* =================== Modifier =================== */
 
@@ -167,18 +161,10 @@ contract Treasury is ITreasury, ContractGuard, ReentrancyGuard {
         return epochLength_;
     }
 
-    function getPegPrice() external override view returns (int256) {
-        return IOracle(flareOracle).getPegPrice();
-    }
-
-    function getPegPriceUpdated() external override view returns (int256) {
-        return IOracle(flareOracle).getPegPriceUpdated();
-    }
-
     // oracle
     function getFlarePrice() public override view returns (uint256 flarePrice) {
         try IOracle(flareOracle).consult(flare, 1e18) returns (uint144 price) {
-            return uint256(price);
+            return uint256(price) * 1e12;
         } catch {
             revert("oracle failed");
         }
@@ -186,7 +172,7 @@ contract Treasury is ITreasury, ContractGuard, ReentrancyGuard {
 
     function getFlareUpdatedPrice() public override view returns (uint256 _flarePrice) {
         try IOracle(flareOracle).twap(flare, 1e18) returns (uint144 price) {
-            return uint256(price);
+            return uint256(price) * 1e12;
         } catch {
             revert("oracle failed");
         }
@@ -201,7 +187,7 @@ contract Treasury is ITreasury, ContractGuard, ReentrancyGuard {
     }
 
     function getLightUpdatedPrice() public override view returns (uint256 _lightPrice) {
-        try IOracle(lightOracle).twap(flare, 1e18) returns (uint144 price) {
+        try IOracle(lightOracle).twap(light, 1e18) returns (uint144 price) {
             return uint256(price);
         } catch {
             revert("oracle failed");
@@ -237,7 +223,7 @@ contract Treasury is ITreasury, ContractGuard, ReentrancyGuard {
     }
 
     function boardroomSharedPercent() external override view returns (uint256) {
-        return uint256(10000).sub(daoFundSharedPercent).sub(marketingFundSharedPercent).sub(insuranceFundSharedPercent);
+        return uint256(10000).sub(daoFundSharedPercent).sub(devFundSharedPercent);
     }
 
     // budget
@@ -370,6 +356,9 @@ contract Treasury is ITreasury, ContractGuard, ReentrancyGuard {
         address _flare,
         address _bflare,
         address _flareOracle,
+        address _light,
+        address _blight,
+        address _lightOracle,
         address _boardroom,
         uint256 _startEpoch,
         uint256 _startTime
@@ -377,12 +366,15 @@ contract Treasury is ITreasury, ContractGuard, ReentrancyGuard {
         flare = _flare;
         bflare = _bflare;
         flareOracle = _flareOracle;
+        light = _light;
+        blight = _blight;
+        lightOracle = _lightOracle;
         boardroom = _boardroom;
 
         epoch_ = _startEpoch;
         startTime = _startTime;
-        epochLength_ = 6 hours;
-        lastEpochTime = _startTime.sub(6 hours);
+        epochLength_ = 1 hours;
+        lastEpochTime = _startTime.sub(1 hours);
 
         priceOne = 10 ** 18; // This is to allow a PEG of 1 flare per VVS
         priceCeiling = priceOne.mul(1001).div(1000);
@@ -400,9 +392,9 @@ contract Treasury is ITreasury, ContractGuard, ReentrancyGuard {
         discountPercent = 0; // no discount
         premiumPercent = 6500; // 65% premium
 
-        // First 28 epochs with 4.5% expansion
+        // First 28 epochs with 2% expansion
         bootstrapEpochs = 28;
-        bootstrapSupplyExpansionPercent = 450;
+        bootstrapSupplyExpansionPercent = 200;
 
         // set seigniorageSaved to it's balance
         seigniorageSaved[flare] = IERC20(flare).balanceOf(address(this));
@@ -423,10 +415,6 @@ contract Treasury is ITreasury, ContractGuard, ReentrancyGuard {
 
     function setBoardroom(address _boardroom) external onlyOperator {
         boardroom = _boardroom;
-    }
-
-    function setRegulationStats(address _regulationStats) external onlyOperator {
-        regulationStats = _regulationStats;
     }
 
     function setFlareOracle(address _flareOracle) external onlyOperator {
@@ -473,23 +461,17 @@ contract Treasury is ITreasury, ContractGuard, ReentrancyGuard {
     function setExtraFunds(
         address _daoFund,
         uint256 _daoFundSharedPercent,
-        address _marketingFund,
-        uint256 _marketingFundSharedPercent,
-        address _insuranceFund,
-        uint256 _insuranceFundSharedPercent
+        address _devFund,
+        uint256 _devFundSharedPercent
     ) external onlyOperator {
         require(_daoFundSharedPercent == 0 || _daoFund != address(0), "zero");
         require(_daoFundSharedPercent <= 4000, "out of range"); // <= 40%
-        require(_marketingFundSharedPercent == 0 || _marketingFund != address(0), "zero");
-        require(_marketingFundSharedPercent <= 2000, "out of range"); // <= 20%
-        require(_insuranceFundSharedPercent == 0 || _insuranceFund != address(0), "zero");
-        require(_insuranceFundSharedPercent <= 3000, "out of range"); // <= 30%
+        require(_devFundSharedPercent == 0 || _devFund != address(0), "zero");
+        require(_devFundSharedPercent <= 2000, "out of range"); // <= 20%
         daoFund = _daoFund;
         daoFundSharedPercent = _daoFundSharedPercent;
-        marketingFund = _marketingFund;
-        marketingFundSharedPercent = _marketingFundSharedPercent;
-        insuranceFund = _insuranceFund;
-        insuranceFundSharedPercent = _insuranceFundSharedPercent;
+        devFund = _devFund;
+        devFundSharedPercent = _devFundSharedPercent;
     }
 
     function setDiscountConfig(uint256 _maxDiscountRate, uint256 _discountPercent) external onlyOperator {
@@ -623,31 +605,24 @@ contract Treasury is ITreasury, ContractGuard, ReentrancyGuard {
             IERC20(_token).transfer(daoFund, _daoFundSharedAmount);
         }
 
-        uint256 _marketingFundSharedAmount = 0;
-        if (marketingFundSharedPercent > 0) {
-            _marketingFundSharedAmount = _amount.mul(marketingFundSharedPercent).div(10000);
-            IERC20(_token).transfer(marketingFund, _marketingFundSharedAmount);
+        uint256 _devFundSharedAmount = 0;
+        if (devFundSharedPercent > 0) {
+            _devFundSharedAmount = _amount.mul(devFundSharedPercent).div(10000);
+            IERC20(_token).transfer(devFund, _devFundSharedAmount);
         }
 
-        uint256 _insuranceFundSharedAmount = 0;
-        if (insuranceFundSharedPercent > 0) {
-            _insuranceFundSharedAmount = _amount.mul(insuranceFundSharedPercent).div(10000);
-            IERC20(_token).transfer(insuranceFund, _insuranceFundSharedAmount);
-        }
-
-        _amount = _amount.sub(_daoFundSharedAmount).sub(_marketingFundSharedAmount).sub(_insuranceFundSharedAmount);
+        _amount = _amount.sub(_daoFundSharedAmount).sub(_devFundSharedAmount);
 
         IERC20(_token).safeIncreaseAllowance(boardroom, _amount);
         IBoardroom(boardroom).allocateSeigniorage(_token, _amount);
 
         emit FundingAdded(epoch_.add(1), block.timestamp, previousEpochPrice, _expanded,
-            _amount, _daoFundSharedAmount, _marketingFundSharedAmount, _insuranceFundSharedAmount);
+            _amount, _daoFundSharedAmount, _devFundSharedAmount);
     }
 
     function _allocateSeigniorage(address _token, address _bond) internal {
         updatePrice(_token);
         previousEpochPrice = getPegTokenPrice(_token);
-        address _flare = flare;
         uint256 _supply = getTokenCirculatingSupply(_token);
         uint256 _nextSupplyTarget = nextSupplyTarget[_token];
         if (_supply >= _nextSupplyTarget) {
@@ -688,7 +663,7 @@ contract Treasury is ITreasury, ContractGuard, ReentrancyGuard {
                 if (_savedForBoardroom > 0) {
                     _sendToBoardroom(_token, _savedForBoardroom, _seigniorage);
                 } else {
-                    emit FundingAdded(epoch_.add(1), block.timestamp, previousEpochPrice, 0, 0, 0, 0, 0);
+                    emit FundingAdded(epoch_.add(1), block.timestamp, previousEpochPrice, 0, 0, 0, 0);
                 }
                 if (_savedForBond > 0) {
                     seigniorageSaved[_token] = seigniorageSaved[_token].add(_savedForBond);
@@ -696,7 +671,7 @@ contract Treasury is ITreasury, ContractGuard, ReentrancyGuard {
                     emit TreasuryFunded(block.timestamp, _savedForBond);
                 }
             } else if (previousEpochPrice < priceOne) {
-                emit FundingAdded(epoch_.add(1), block.timestamp, previousEpochPrice, 0, 0, 0, 0, 0);
+                emit FundingAdded(epoch_.add(1), block.timestamp, previousEpochPrice, 0, 0, 0, 0);
             }
         }
 
@@ -738,8 +713,7 @@ contract Treasury is ITreasury, ContractGuard, ReentrancyGuard {
             }
             uint256 _expanded = _supply.mul(_percentage).div(1e18);
             uint256 _daoFundSharedAmount = 0;
-            uint256 _marketingFundSharedAmount = 0;
-            uint256 _insuranceFundSharedAmount = 0;
+            uint256 _devFundSharedAmount = 0;
             uint256 _boardroomAmount = 0;
             if (_expanded > 0) {
                 IBasisAsset(_pegToken).mint(address(this), _expanded);
@@ -749,27 +723,18 @@ contract Treasury is ITreasury, ContractGuard, ReentrancyGuard {
                     IERC20(_pegToken).transfer(daoFund, _daoFundSharedAmount);
                 }
 
-                if (marketingFundSharedPercent > 0) {
-                    _marketingFundSharedAmount = _expanded.mul(marketingFundSharedPercent).div(10000);
-                    IERC20(_pegToken).transfer(marketingFund, _marketingFundSharedAmount);
+                if (devFundSharedPercent > 0) {
+                    _devFundSharedAmount = _expanded.mul(devFundSharedPercent).div(10000);
+                    IERC20(_pegToken).transfer(devFund, _devFundSharedAmount);
                 }
-
-                if (insuranceFundSharedPercent > 0) {
-                    _insuranceFundSharedAmount = _expanded.mul(insuranceFundSharedPercent).div(10000);
-                    IERC20(_pegToken).transfer(insuranceFund, _insuranceFundSharedAmount);
-                }
-
-                _boardroomAmount = _expanded.sub(_daoFundSharedAmount).sub(_marketingFundSharedAmount).sub(_insuranceFundSharedAmount);
+                _boardroomAmount = _expanded.sub(_daoFundSharedAmount).sub(_devFundSharedAmount);
 
                 IERC20(_pegToken).safeIncreaseAllowance(boardroom, _boardroomAmount);
                 IBoardroom(boardroom).allocateSeigniorage(_pegToken, _boardroomAmount);
             }
 
-            if (regulationStats != address(0)) IRegulationStats(regulationStats).addPegEpochInfo(_pegToken, _epoch.add(1), _pegTokenTwap, _expanded,
-                _boardroomAmount, _daoFundSharedAmount, _marketingFundSharedAmount, _insuranceFundSharedAmount);
-
             emit PegTokenFundingAdded(_pegToken, _epoch.add(1), block.timestamp, _pegTokenTwap, _expanded,
-                _boardroomAmount, _daoFundSharedAmount, _marketingFundSharedAmount, _insuranceFundSharedAmount);
+                _boardroomAmount, _daoFundSharedAmount, _devFundSharedAmount);
         }
     }
 
